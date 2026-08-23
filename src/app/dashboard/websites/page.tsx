@@ -14,6 +14,7 @@ type Website = {
   issuesCount?: number;
   scores?: Record<string, number>;
   issues?: Issue[];
+  scanError?: string;
 };
 
 type Issue = {
@@ -35,79 +36,6 @@ function normalizeUrl(input: string): string {
   } catch {
     return "";
   }
-}
-
-function mockScanResult(url: string): Partial<Website> {
-  const issues: Issue[] = [
-    {
-      id: crypto.randomUUID(),
-      category: "SEO",
-      severity: "HIGH",
-      title: "عنوان صفحه کوتاه است",
-      description: "عنوان صفحه باید بین ۳۰ تا ۶۰ کاراکتر باشد.",
-      recommendation: "عنوان را به شکل «نام برند | خدمات اصلی» گسترش دهید.",
-    },
-    {
-      id: crypto.randomUUID(),
-      category: "SEO",
-      severity: "MEDIUM",
-      title: "متا توضیحات وجود ندارد",
-      description: "تگ meta description تعریف نشده است.",
-      recommendation: "یک توضیح ۱۵۰–۱۶۰ کاراکتری اضافه کنید.",
-    },
-    {
-      id: crypto.randomUUID(),
-      category: "SECURITY",
-      severity: "CRITICAL",
-      title: "هدر CSP وجود ندارد",
-      description: "Content-Security-Policy تنظیم نشده است.",
-      recommendation: "یک سیاست CSP مناسب تعریف کنید.",
-    },
-    {
-      id: crypto.randomUUID(),
-      category: "RTL",
-      severity: "HIGH",
-      title: "ویژگی dir تنظیم نشده",
-      description: "تگ html فاقد dir=\"rtl\" است.",
-      recommendation: "dir=\"rtl\" و lang=\"fa\" را اضافه کنید.",
-    },
-    {
-      id: crypto.randomUUID(),
-      category: "ACCESSIBILITY",
-      severity: "MEDIUM",
-      title: "تصاویر بدون alt",
-      description: "چند تصویر فاقد متن جایگزین هستند.",
-      recommendation: "برای تمام تصاویر معنادار alt بنویسید.",
-    },
-    {
-      id: crypto.randomUUID(),
-      category: "PERFORMANCE",
-      severity: "HIGH",
-      title: "تصاویر بدون فشرده‌سازی",
-      description: "تصاویر بزرگ بدون بهینه‌سازی یافت شد.",
-      recommendation: "از WebP/AVIF و فشرده‌سازی استفاده کنید.",
-    },
-  ];
-
-  const scores = {
-    seo: 68,
-    performance: 62,
-    accessibility: 74,
-    security: 55,
-    mobile: 71,
-    rtl: 48,
-  };
-  const overall = Math.round(
-    Object.values(scores).reduce((a, b) => a + b, 0) / Object.values(scores).length
-  );
-
-  return {
-    lastScore: overall,
-    lastScanAt: new Date().toISOString(),
-    issuesCount: issues.length,
-    scores,
-    issues,
-  };
 }
 
 export default function WebsitesPage() {
@@ -161,14 +89,46 @@ export default function WebsitesPage() {
   }
 
   async function runScan(id: string) {
+    const site = websites.find((w) => w.id === id);
+    if (!site) return;
     setScanning(id);
-    await new Promise((r) => setTimeout(r, 1500));
-    const list = websites.map((w) => {
-      if (w.id !== id) return w;
-      return { ...w, ...mockScanResult(w.url) };
-    });
-    save(list);
-    setScanning(null);
+    setError("");
+    try {
+      const res = await fetch("/api/v1/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: site.url }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        const list = websites.map((w) =>
+          w.id === id
+            ? { ...w, scanError: data.error || "اسکن ناموفق بود" }
+            : w
+        );
+        save(list);
+        setError(data.error || "اسکن ناموفق بود");
+        return;
+      }
+      const r = data.result;
+      const list = websites.map((w) => {
+        if (w.id !== id) return w;
+        return {
+          ...w,
+          lastScore: r.overallScore,
+          lastScanAt: r.meta.scannedAt,
+          issuesCount: r.issues.length,
+          scores: r.scores,
+          issues: r.issues,
+          scanError: undefined,
+        };
+      });
+      save(list);
+    } catch {
+      setError("خطا در ارتباط با سرور اسکن");
+    } finally {
+      setScanning(null);
+    }
   }
 
   return (
@@ -177,7 +137,7 @@ export default function WebsitesPage() {
         <div>
           <h1 className="text-2xl font-bold">وب‌سایت‌ها</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            مدیریت و اسکن وب‌سایت‌های شما
+            مدیریت و اسکن واقعی وب‌سایت‌ها (با حفاظت SSRF)
           </p>
         </div>
         <Button className="gap-2" onClick={() => setShowForm(!showForm)}>
@@ -185,6 +145,12 @@ export default function WebsitesPage() {
           افزودن وب‌سایت
         </Button>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {showForm && (
         <form
@@ -215,7 +181,6 @@ export default function WebsitesPage() {
               />
             </div>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex gap-2">
             <Button type="submit">افزودن</Button>
             <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
@@ -249,6 +214,9 @@ export default function WebsitesPage() {
                     {new Date(w.lastScanAt).toLocaleString("fa-IR")}
                     {w.issuesCount != null && ` · ${w.issuesCount} مشکل`}
                   </p>
+                )}
+                {w.scanError && (
+                  <p className="text-xs text-destructive mt-1">{w.scanError}</p>
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
