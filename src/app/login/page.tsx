@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { BarChart3 } from "lucide-react";
+import { resolveRole } from "@/lib/auth-config";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,17 +19,24 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    // Mock auth for demo — any email/password works
     await new Promise((r) => setTimeout(r, 600));
     if (!email || !password) {
       setError("ایمیل و رمز عبور را وارد کنید.");
       setLoading(false);
       return;
     }
+    const role = resolveRole(email);
     if (typeof window !== "undefined") {
-      localStorage.setItem("aisc_user", JSON.stringify({ email, name: email.split("@")[0] }));
+      localStorage.setItem(
+        "aisc_user",
+        JSON.stringify({
+          email: email.trim(),
+          name: email.split("@")[0],
+          role,
+        })
+      );
     }
-    router.push("/dashboard");
+    router.push(role === "ADMIN" ? "/dashboard/admin" : "/dashboard");
   }
 
   return (
@@ -70,9 +78,7 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
 
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? "در حال ورود..." : "ورود"}
@@ -84,9 +90,6 @@ export default function LoginPage() {
           <Link href="/register" className="text-primary hover:underline">
             ثبت‌نام کنید
           </Link>
-        </p>
-        <p className="text-xs text-center text-muted-foreground mt-3">
-          نسخه دمو: هر ایمیل و رمزی پذیرفته می‌شود
         </p>
       </div>
     </div>
