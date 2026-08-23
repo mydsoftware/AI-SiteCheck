@@ -14,10 +14,18 @@ import {
   LogOut,
   Menu,
   X,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isAdminEmail } from "@/lib/auth-config";
 
-const nav = [
+type StoredUser = {
+  name?: string;
+  email?: string;
+  role?: string;
+};
+
+const baseNav = [
   { href: "/dashboard", label: "نمای کلی", icon: LayoutDashboard },
   { href: "/dashboard/websites", label: "وب‌سایت‌ها", icon: Globe },
   { href: "/dashboard/scans", label: "اسکن‌ها", icon: ScanSearch },
@@ -33,7 +41,7 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
+  const [user, setUser] = useState<StoredUser | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -43,7 +51,13 @@ export default function DashboardLayout({
       return;
     }
     try {
-      setUser(JSON.parse(raw));
+      const u = JSON.parse(raw) as StoredUser;
+      // refresh role from email in case config changed
+      if (u.email && isAdminEmail(u.email)) {
+        u.role = "ADMIN";
+        localStorage.setItem("aisc_user", JSON.stringify(u));
+      }
+      setUser(u);
     } catch {
       router.replace("/login");
     }
@@ -63,9 +77,16 @@ export default function DashboardLayout({
     );
   }
 
+  const isAdmin = user.role === "ADMIN" || isAdminEmail(user.email);
+  const nav = isAdmin
+    ? [
+        ...baseNav,
+        { href: "/dashboard/admin", label: "پنل ادمین", icon: Shield },
+      ]
+    : baseNav;
+
   return (
     <div className="min-h-screen flex bg-muted/20">
-      {/* Mobile overlay */}
       {open && (
         <div
           className="fixed inset-0 bg-black/40 z-40 lg:hidden"
@@ -73,7 +94,6 @@ export default function DashboardLayout({
         />
       )}
 
-      {/* Sidebar */}
       <aside
         className={cn(
           "fixed lg:static inset-y-0 right-0 z-50 w-64 border-l bg-card flex flex-col transition-transform lg:translate-x-0",
@@ -116,7 +136,14 @@ export default function DashboardLayout({
 
         <div className="p-3 border-t">
           <div className="px-3 py-2 text-sm">
-            <p className="font-medium truncate">{user.name || "کاربر"}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-medium truncate">{user.name || "کاربر"}</p>
+              {isAdmin && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/15 text-primary">
+                  ادمین
+                </span>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground truncate" dir="ltr">
               {user.email}
             </p>
@@ -131,7 +158,6 @@ export default function DashboardLayout({
         </div>
       </aside>
 
-      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-16 border-b bg-card flex items-center px-4 gap-3 lg:px-6">
           <button className="lg:hidden" onClick={() => setOpen(true)}>
