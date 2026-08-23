@@ -2,35 +2,67 @@
 
 **سایتت را بررسی کن، مشکلاتش را پیدا کن، اصلاحش کن.**
 
-پلتفرم SaaS برای بررسی و تحلیل وب‌سایت با تمرکز بر بازار فارسی و RTL.
+پلتفرم SaaS بررسی و تحلیل وب‌سایت با تمرکز بر بازار فارسی و RTL.
 
-## استقرار سریع روی Vercel (محیط تست)
+## دمو زنده
 
-1. به [vercel.com](https://vercel.com) بروید و با GitHub وارد شوید.
-2. **Add New Project** → مخزن `mydsoftware/AI-SiteCheck` را انتخاب کنید.
-3. Framework: Next.js (خودکار تشخیص داده می‌شود).
-4. Environment Variables (اختیاری برای مرحله اول):
-   - `MOCK_SCANNER` = `true`
-   - `AI_PROVIDER` = `mock`
-5. Deploy را بزنید.
+https://ai-site-check-rho.vercel.app/
 
-بعد از Deploy، لینک پیش‌نمایش آماده تست است.
+## قابلیت‌های فعلی (v0.2)
 
-برای دیتابیس بعداً از Vercel Postgres یا Neon استفاده می‌کنیم.
+- Landing Page فارسی RTL
+- ثبت‌نام / ورود (دمو — localStorage)
+- Dashboard کامل با سایدبار
+- افزودن وب‌سایت
+- **اسکن واقعی** از طریق `POST /api/v1/scan`
+  - Fetch HTML زنده
+  - حفاظت SSRF (localhost / IP خصوصی / metadata)
+  - تحلیل SEO، امنیت، دسترسی‌پذیری، موبایل، عملکرد، RTL
+  - امتیاز ۰–۱۰۰ و لیست مشکلات با پیشنهاد فارسی
+- تاریخچه اسکن و تجمیع مشکلات
+
+## API
+
+```http
+POST /api/v1/scan
+Content-Type: application/json
+
+{ "url": "https://example.com" }
+```
+
+پاسخ شامل `overallScore`، `scores` و `issues` است.
 
 ## تکنولوژی
 
-- Next.js 15 + TypeScript + Tailwind
-- Prisma + PostgreSQL (مرحله بعد)
-- RTL فارسی
-- Mock Scanner برای تست بدون API پولی
+- Next.js 15 + TypeScript + Tailwind CSS
+- Cheerio برای Parse HTML
+- Zod برای اعتبارسنجی
+- استقرار روی Vercel
 
-## وضعیت فعلی
+## نصب محلی
 
-- [x] Landing Page فارسی RTL
-- [x] ساختار پروژه و کانفیگ Vercel
-- [ ] Auth و Dashboard
-- [ ] Scanner واقعی
-- [ ] اتصال دیتابیس
+```bash
+git clone https://github.com/mydsoftware/AI-SiteCheck.git
+cd AI-SiteCheck
+npm install
+npm run dev
+```
 
-مخزن: https://github.com/mydsoftware/AI-SiteCheck
+## نقشه راه بعدی
+
+- [ ] Auth واقعی (NextAuth) + PostgreSQL
+- [ ] ذخیره اسکن در دیتابیس
+- [ ] Queue / Worker برای اسکن‌های سنگین
+- [ ] گزارش PDF
+- [ ] AutoFix با تأیید کاربر
+- [ ] یکپارچه‌سازی WordPress / GitHub
+
+## امنیت
+
+- SSRF protection روی URL و redirect
+- فقط حسابرسی دفاعی (بدون exploit)
+- کاربر فقط سایت‌هایی را اسکن کند که مجوز دارد
+
+## مجوز
+
+در حال توسعه — استفاده آزمایشی آزاد است.
