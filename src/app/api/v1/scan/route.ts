@@ -7,7 +7,107 @@ const bodySchema = z.object({
   url: z.string().min(3).max(2048),
 });
 
+const MAX_REDIRECTS = 5;
+const FETCH_TIMEOUT_MS = 15_000;
+const MAX_HTML_BYTES = 2_000_000;
+
 export const maxDuration = 30;
+
+async function fetchHtmlSafely(startUrl: string): Promise<
+  | { ok: true; response: Response; finalUrl: string }
+  | { ok: false; response: NextResponse }
+> {
+  let currentUrl = startUrl;
+
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
+    const validation = await validateUrlForScan(currentUrl);
+    if (!validation.ok || !validation.url) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "آدرس وب‌سایت نامعتبر یا غیرمجاز است", code: validation.error },
+          { status: 400 }
+        ),
+      };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    let res: Response;
+    try {
+      res = await fetch(validation.url.toString(), {
+        method: "GET",
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "AI-SiteCheck/0.2 (+https://github.com/mydsoftware/AI-SiteCheck; audit-bot)",
+          Accept: "text/html,application/xhtml+xml",
+        },
+      });
+    } catch {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            error: "امکان دریافت صفحه وجود ندارد. سایت در دسترس نیست یا مسدود است.",
+            code: "fetch_failed",
+          },
+          { status: 502 }
+        ),
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      if (redirectCount === MAX_REDIRECTS) {
+        return {
+          ok: false,
+          response: NextResponse.json(
+            { error: "تعداد ریدایرکت‌ها بیش از حد مجاز است", code: "too_many_redirects" },
+            { status: 400 }
+          ),
+        };
+      }
+
+      const location = res.headers.get("location");
+      if (!location) {
+        return {
+          ok: false,
+          response: NextResponse.json(
+            { error: "ریدایرکت بدون مقصد دریافت شد", code: "invalid_redirect" },
+            { status: 400 }
+          ),
+        };
+      }
+
+      try {
+        currentUrl = new URL(location, validation.url).toString();
+      } catch {
+        return {
+          ok: false,
+          response: NextResponse.json(
+            { error: "مقصد ریدایرکت نامعتبر است", code: "invalid_redirect" },
+            { status: 400 }
+          ),
+        };
+      }
+      continue;
+    }
+
+    return { ok: true, response: res, finalUrl: validation.url.toString() };
+  }
+
+  return {
+    ok: false,
+    response: NextResponse.json(
+      { error: "اسکن به دلیل ریدایرکت‌های غیرعادی متوقف شد", code: "redirect_loop" },
+      { status: 400 }
+    ),
+  };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,44 +137,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const target = validation.url.toString();
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const fetched = await fetchHtmlSafely(validation.url.toString());
+    if (!fetched.ok) return fetched.response;
 
-    let res: Response;
-    try {
-      res = await fetch(target, {
-        method: "GET",
-        redirect: "follow",
-        signal: controller.signal,
-        headers: {
-          "User-Agent":
-            "AI-SiteCheck/0.2 (+https://github.com/mydsoftware/AI-SiteCheck; audit-bot)",
-          Accept: "text/html,application/xhtml+xml",
-        },
-      });
-    } catch (e) {
-      clearTimeout(timeout);
-      return NextResponse.json(
-        {
-          error: "امکان دریافت صفحه وجود ندارد. سایت در دسترس نیست یا مسدود است.",
-          code: "fetch_failed",
-        },
-        { status: 502 }
-      );
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    // Re-validate final URL after redirects
-    const finalValidation = await validateUrlForScan(res.url);
-    if (!finalValidation.ok) {
-      return NextResponse.json(
-        { error: "ریدایرکت به آدرس غیرمجاز انجام شد", code: "ssrf" },
-        { status: 400 }
-      );
-    }
-
+    const { response: res, finalUrl } = fetched;
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
       return NextResponse.json(
@@ -87,9 +153,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const contentLength = Number(res.headers.get("content-length") || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_HTML_BYTES) {
+      return NextResponse.json(
+        { error: "صفحه بیش از حد بزرگ است", code: "too_large" },
+        { status: 413 }
+      );
+    }
+
     const html = await res.text();
-    // Cap size ~2MB
-    if (html.length > 2_000_000) {
+    if (Buffer.byteLength(html, "utf8") > MAX_HTML_BYTES) {
       return NextResponse.json(
         { error: "صفحه بیش از حد بزرگ است", code: "too_large" },
         { status: 413 }
@@ -101,12 +174,15 @@ export async function POST(req: NextRequest) {
       headerObj[k] = v;
     });
 
-    const result = analyzeHtml(html, headerObj, target, res.url, res.status);
+    const result = analyzeHtml(
+      html,
+      headerObj,
+      validation.url.toString(),
+      finalUrl,
+      res.status
+    );
 
-    return NextResponse.json({
-      ok: true,
-      result,
-    });
+    return NextResponse.json({ ok: true, result });
   } catch (e) {
     console.error("[scan]", e);
     return NextResponse.json(
