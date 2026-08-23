@@ -41,6 +41,8 @@ const categoryFa: Record<string, string> = {
   SECURITY: "امنیت",
   MOBILE: "موبایل",
   RTL: "فارسی / RTL",
+  IMAGE: "تصاویر",
+  TECHNICAL: "فنی",
 };
 
 const severityColor: Record<string, string> = {
@@ -57,6 +59,7 @@ export default function WebsiteDetailPage() {
   const id = params.id as string;
   const [site, setSite] = useState<Website | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState("");
 
   function load() {
     const raw = localStorage.getItem("aisc_websites");
@@ -78,32 +81,40 @@ export default function WebsiteDetailPage() {
   async function rescan() {
     if (!site) return;
     setScanning(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    const raw = localStorage.getItem("aisc_websites");
-    if (!raw) return;
-    const list: Website[] = JSON.parse(raw);
-    const updated = list.map((w) => {
-      if (w.id !== id) return w;
-      // reuse same mock structure
-      return {
-        ...w,
-        lastScore: 66,
-        lastScanAt: new Date().toISOString(),
-        issuesCount: w.issues?.length || 6,
-        scores: {
-          seo: 68,
-          performance: 62,
-          accessibility: 74,
-          security: 55,
-          mobile: 71,
-          rtl: 48,
-        },
-        issues: w.issues || [],
-      };
-    });
-    localStorage.setItem("aisc_websites", JSON.stringify(updated));
-    setSite(updated.find((w) => w.id === id) || null);
-    setScanning(false);
+    setError("");
+    try {
+      const res = await fetch("/api/v1/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: site.url }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setError(data.error || "اسکن ناموفق بود");
+        return;
+      }
+      const r = data.result;
+      const raw = localStorage.getItem("aisc_websites");
+      if (!raw) return;
+      const list: Website[] = JSON.parse(raw);
+      const updated = list.map((w) => {
+        if (w.id !== id) return w;
+        return {
+          ...w,
+          lastScore: r.overallScore,
+          lastScanAt: r.meta.scannedAt,
+          issuesCount: r.issues.length,
+          scores: r.scores,
+          issues: r.issues,
+        };
+      });
+      localStorage.setItem("aisc_websites", JSON.stringify(updated));
+      setSite(updated.find((w) => w.id === id) || null);
+    } catch {
+      setError("خطا در ارتباط با سرور");
+    } finally {
+      setScanning(false);
+    }
   }
 
   if (!site) {
@@ -148,6 +159,12 @@ export default function WebsiteDetailPage() {
         </Button>
       </div>
 
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
       {site.lastScore != null ? (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -183,7 +200,9 @@ export default function WebsiteDetailPage() {
                 {Object.entries(site.scores).map(([key, val]) => (
                   <div key={key} className="flex items-center justify-between">
                     <span className="text-sm">
-                      {categoryFa[key.toUpperCase()] || key}
+                      {categoryFa[key.toUpperCase()] ||
+                        categoryFa[key] ||
+                        key}
                     </span>
                     <div className="flex items-center gap-2">
                       <div className="w-24 h-2 rounded-full bg-muted overflow-hidden">
