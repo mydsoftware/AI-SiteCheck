@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { BarChart3 } from "lucide-react";
+import { resolveRole } from "@/lib/auth-config";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -30,10 +31,14 @@ export default function RegisterPage() {
       setLoading(false);
       return;
     }
+    const role = resolveRole(email);
     if (typeof window !== "undefined") {
-      localStorage.setItem("aisc_user", JSON.stringify({ email, name }));
+      localStorage.setItem(
+        "aisc_user",
+        JSON.stringify({ email: email.trim(), name, role })
+      );
     }
-    router.push("/dashboard");
+    router.push(role === "ADMIN" ? "/dashboard/admin" : "/dashboard");
   }
 
   return (
